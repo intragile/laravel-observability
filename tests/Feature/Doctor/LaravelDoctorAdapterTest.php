@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IntrAgile\Observability\Tests\Feature\Doctor;
 
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Artisan;
 use IntrAgile\Observability\Doctor\LaravelDoctor\ErrorDigestIsDeliverable;
 use IntrAgile\Observability\Doctor\LaravelDoctor\HealthChecksPass;
@@ -16,6 +17,9 @@ use Monolog\Handler\StreamHandler;
 use Spatie\Health\Checks\Check;
 use Spatie\Health\Checks\Result;
 use Spatie\Health\Health;
+use Spatie\Health\ResultStores\ResultStore;
+use Spatie\Health\ResultStores\StoredCheckResults\StoredCheckResult;
+use Spatie\Health\ResultStores\StoredCheckResults\StoredCheckResults;
 
 final class LaravelDoctorAdapterTest extends TestCase
 {
@@ -98,6 +102,43 @@ final class LaravelDoctorAdapterTest extends TestCase
 
         $this->assertSame(0, $check->runs);
     }
+
+    public function test_health_checks_pass_reports_registration_then_stored_results_then_scheduling(): void
+    {
+        $check = new DoctorAdapterCountingCheck;
+        app(Health::class)->checks([$check]);
+        $this->instance(ResultStore::class, new DoctorAdapterOkResultStore);
+
+        Artisan::call('doctor', ['--only' => ['observability'], '--format' => 'json']);
+        $report = json_decode(Artisan::output(), true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertIsArray($report);
+        $this->assertIsArray($report['diagnostics']);
+
+        $details = null;
+
+        foreach ($report['diagnostics'] as $diagnostic) {
+            $this->assertIsArray($diagnostic);
+
+            if ($diagnostic['class'] === HealthChecksPass::class) {
+                $details = $diagnostic['details'] ?? null;
+            }
+        }
+
+        $this->assertIsString($details);
+
+        $registration = strpos($details, '] Health checks:');
+        $stored = strpos($details, '] Stored health results:');
+        $scheduling = strpos($details, '] Health check schedule:');
+
+        $this->assertNotFalse($registration);
+        $this->assertNotFalse($stored);
+        $this->assertNotFalse($scheduling);
+        $this->assertLessThan($stored, $registration);
+        $this->assertLessThan($scheduling, $stored);
+        $this->assertStringContainsString('- [ok] Stored health results: 1 checks ok, last run 0 minutes ago.', $details);
+        $this->assertSame(0, $check->runs);
+    }
 }
 
 final class DoctorAdapterCountingCheck extends Check
@@ -109,5 +150,17 @@ final class DoctorAdapterCountingCheck extends Check
         $this->runs++;
 
         return Result::make()->ok();
+    }
+}
+
+final class DoctorAdapterOkResultStore implements ResultStore
+{
+    public function save(Collection $checkResults): void {}
+
+    public function latestResults(): StoredCheckResults
+    {
+        return new StoredCheckResults(now(), new Collection([
+            new StoredCheckResult(name: 'database', label: 'Database', status: 'ok'),
+        ]));
     }
 }

@@ -10,10 +10,11 @@ use IntrAgile\Observability\Doctor\Probes\HealthChecksProbe;
 use IntrAgile\Observability\Doctor\Probes\SchedulingProbe;
 
 /**
- * Health checks are registered and scheduled.
+ * Health checks are registered, their latest stored run is recent and passing, and they are scheduled.
  *
- * The checks themselves are not run here, because some of them make network calls; that is what
- * `observability:doctor --live` is for.
+ * The checks themselves are never run here, because some of them make network calls; the stored
+ * results are only read from the result store that `health:check` writes to. Running the checks is
+ * what `observability:doctor --live` is for.
  */
 final class HealthChecksPass extends ObservabilityDiagnostic
 {
@@ -26,6 +27,10 @@ final class HealthChecksPass extends ObservabilityDiagnostic
 
     protected function entries(DoctorOptions $options): array
     {
-        return [$this->checks->registration(), ...DoctorRunner::runProbe($this->scheduling, $options)];
+        return [
+            $this->checks->registration(),
+            $this->checks->storedResults(),
+            ...DoctorRunner::runProbe($this->scheduling, $options),
+        ];
     }
 }
