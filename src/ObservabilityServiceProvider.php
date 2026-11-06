@@ -7,13 +7,23 @@ namespace IntrAgile\Observability;
 use Closure;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Env;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use IntrAgile\Observability\Backup\RecordBackupHeartbeat;
+use IntrAgile\Observability\Console\DoctorCommand;
 use IntrAgile\Observability\Console\ErrorDigestCommand;
 use IntrAgile\Observability\Console\InstallCommand;
+use IntrAgile\Observability\Doctor\DoctorRunner;
+use IntrAgile\Observability\Doctor\LaravelDoctor\ObservabilityDiagnostic;
+use IntrAgile\Observability\Doctor\Probes\BroadcastProbe;
+use IntrAgile\Observability\Doctor\Probes\ErrorDigestProbe;
+use IntrAgile\Observability\Doctor\Probes\HealthChecksProbe;
+use IntrAgile\Observability\Doctor\Probes\LoggingProbe;
+use IntrAgile\Observability\Doctor\Probes\PrometheusProbe;
+use IntrAgile\Observability\Doctor\Probes\SchedulingProbe;
 use IntrAgile\Observability\Http\Middleware\PrometheusBasicAuth;
 use IntrAgile\Observability\Http\Middleware\RecordRequestTiming;
 use IntrAgile\Observability\Metrics\PrometheusRegistrar;
@@ -26,17 +36,32 @@ use Spatie\Health\Health;
 /**
  * Wires the package into the application.
  *
- * Optional packages (spatie/laravel-prometheus, spatie/laravel-backup, laravel/reverb) are only
- * touched after Inspector has confirmed they are installed, and only through class name strings,
- * so the application boots unchanged when any of them is missing.
+ * Optional packages (spatie/laravel-prometheus, spatie/laravel-backup, laravel/reverb,
+ * laravel/doctor) are only touched after Inspector has confirmed they are installed, and only
+ * through class name strings, so the application boots unchanged when any of them is missing.
  */
 final class ObservabilityServiceProvider extends ServiceProvider
 {
+    private const DOCTOR_DIAGNOSTIC_CLASS = 'Laravel\Doctor\Diagnostic';
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/observability.php', 'observability');
 
         $this->app->singleton(Inspector::class, fn (): Inspector => new Inspector($this->config()));
+
+        // Static probes first, then the live ones, so the report reads from configuration to network.
+        $this->app->bind(DoctorRunner::class, static fn (Application $app): DoctorRunner => new DoctorRunner(
+            $app->make(Inspector::class),
+            [
+                $app->make(LoggingProbe::class),
+                $app->make(SchedulingProbe::class),
+                $app->make(PrometheusProbe::class),
+                $app->make(ErrorDigestProbe::class),
+                $app->make(HealthChecksProbe::class),
+                $app->make(BroadcastProbe::class),
+            ],
+        ));
 
         // Deferred to the booting phase because the Prometheus provider may merge its own config
         // after this provider registers; appending earlier would replace its default middleware
@@ -72,13 +97,20 @@ final class ObservabilityServiceProvider extends ServiceProvider
             $this->scheduleErrorDigest();
         }
 
+        if (class_exists(self::DOCTOR_DIAGNOSTIC_CLASS) && class_exists(Inspector::DOCTOR_CLASS)) {
+            // Fires immediately when laravel/doctor was already resolved, otherwise on first use.
+            $this->callAfterResolving(Inspector::DOCTOR_CLASS, static function (object $doctor): void {
+                ObservabilityDiagnostic::register($doctor);
+            });
+        }
+
         if ($this->app->runningInConsole()) {
             // Unit tests commonly run as root inside containers; exiting there would kill the runner.
             if (! $this->app->runningUnitTests()) {
                 $this->enforceRootGuard(RootExecutionGuard::currentEuid());
             }
 
-            $this->commands([ErrorDigestCommand::class, InstallCommand::class]);
+            $this->commands([DoctorCommand::class, ErrorDigestCommand::class, InstallCommand::class]);
 
             $this->publishes([
                 __DIR__.'/../config/observability.php' => $this->app->configPath('observability.php'),
