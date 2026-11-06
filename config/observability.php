@@ -6,6 +6,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Deploy identifier
+    |--------------------------------------------------------------------------
+    |
+    | Optional release identifier, such as the commit SHA. A new value restarts
+    | the health check warmup even when storage survives the deploy, and it is
+    | shown in health notifications.
+    |
+    */
+
+    'deploy_id' => env('OBSERVABILITY_DEPLOY_ID'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Structured logging
     |--------------------------------------------------------------------------
     |
@@ -78,6 +91,36 @@ return [
             ],
             'container_memory' => ['enabled' => true, 'root' => '/sys/fs/cgroup', 'warn_percent' => 90, 'fail_percent' => 95],
         ],
+
+        // Schedules health:check, held back for a warmup window after each deploy so the first
+        // ticks do not alert on heartbeats that have not been written yet.
+        'schedule' => [
+            'enabled' => (bool) env('OBSERVABILITY_HEALTH_SCHEDULE', false),
+            'cron' => '* * * * *',
+            'on_one_server' => true,
+            'warmup_seconds' => 300,
+            // null stores the deploy marker in storage/app/observability/health-warmup.json.
+            'flag_path' => null,
+        ],
+
+        // A JSON results endpoint whose ?fresh run never sends notifications, for deploy gates.
+        'json_endpoint' => [
+            'enabled' => (bool) env('OBSERVABILITY_HEALTH_JSON', false),
+            'uri' => 'health-json',
+            'middleware' => [],
+            'name' => 'observability.health-json',
+        ],
+
+        // Read by IntrAgile\Observability\Health\CheckFailedNotification.
+        'notifications' => [
+            'environments' => ['production'],
+            // When set, forces notifications on or off regardless of the environment.
+            'override' => env('HEALTH_NOTIFICATIONS_ENABLED'),
+            'instance' => env('APP_ALIAS', env('APP_NAME', 'laravel')),
+        ],
+
+        // laravel/doctor warns when the latest stored health run is older than this.
+        'stored_results' => ['stale_minutes' => 10],
     ],
 
     /*

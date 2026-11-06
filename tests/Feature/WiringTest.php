@@ -18,6 +18,7 @@ use IntrAgile\Observability\Checks\FailedJobsCheck;
 use IntrAgile\Observability\Checks\MailRelayCheck;
 use IntrAgile\Observability\Checks\RequestTimingCheck;
 use IntrAgile\Observability\Checks\SchemaCompleteCheck;
+use IntrAgile\Observability\Http\Controllers\HealthJsonController;
 use IntrAgile\Observability\Http\Middleware\PrometheusBasicAuth;
 use IntrAgile\Observability\Http\Middleware\RecordRequestTiming;
 use IntrAgile\Observability\ObservabilityServiceProvider;
@@ -247,6 +248,108 @@ final class WiringTest extends TestCase
     {
         $app->make('config')->set('observability.error_digest.enabled', true);
         $app->make('config')->set('observability.error_digest.schedule', '*/10 * * * *');
+    }
+
+    #[DefineEnvironment('enableHealthScheduleWithoutWarmup')]
+    public function test_health_check_is_scheduled_when_enabled(): void
+    {
+        $events = $this->healthEvents();
+
+        $this->assertCount(1, $events);
+        $this->assertSame('*/2 * * * *', $events[0]->expression);
+        $this->assertTrue($events[0]->onOneServer);
+    }
+
+    #[DefineEnvironment('enableHealthScheduleWithWarmup')]
+    public function test_health_check_is_held_back_on_the_first_tick_after_a_deploy(): void
+    {
+        $this->assertSame([], $this->healthEvents());
+        $this->assertFileExists($this->warmupFlagPath());
+    }
+
+    public function test_health_check_is_not_scheduled_by_default(): void
+    {
+        $this->assertSame([], $this->healthEvents());
+    }
+
+    #[DefineEnvironment('enableJsonEndpoint')]
+    public function test_json_endpoint_route_is_registered_when_enabled(): void
+    {
+        $route = $this->router()->getRoutes()->getByName('observability.health-json');
+
+        $this->assertInstanceOf(Route::class, $route);
+        $this->assertSame('status/health.json', $route->uri());
+        $this->assertSame(HealthJsonController::class, $route->getActionName());
+        $this->assertContains('auth.basic', $route->middleware());
+    }
+
+    public function test_json_endpoint_route_is_absent_by_default(): void
+    {
+        $this->assertNull($this->router()->getRoutes()->getByName('observability.health-json'));
+    }
+
+    /**
+     * @param  Application  $app
+     */
+    protected function enableHealthScheduleWithoutWarmup($app): void
+    {
+        $this->configureHealthSchedule($app, 0);
+    }
+
+    /**
+     * @param  Application  $app
+     */
+    protected function enableHealthScheduleWithWarmup($app): void
+    {
+        $this->configureHealthSchedule($app, 300);
+    }
+
+    /**
+     * @param  Application  $app
+     */
+    protected function enableJsonEndpoint($app): void
+    {
+        $app->make('config')->set('observability.health.json_endpoint', [
+            'enabled' => true,
+            'uri' => 'status/health.json',
+            'middleware' => ['auth.basic'],
+            'name' => 'observability.health-json',
+        ]);
+    }
+
+    /**
+     * @param  Application  $app
+     */
+    private function configureHealthSchedule($app, int $warmupSeconds): void
+    {
+        @unlink($this->warmupFlagPath());
+
+        $app->make('config')->set('observability.health.schedule', [
+            'enabled' => true,
+            'cron' => '*/2 * * * *',
+            'on_one_server' => true,
+            'warmup_seconds' => $warmupSeconds,
+            'flag_path' => $this->warmupFlagPath(),
+        ]);
+    }
+
+    private function warmupFlagPath(): string
+    {
+        return sys_get_temp_dir().'/observability-wiring-test-'.getmypid().'/health-warmup.json';
+    }
+
+    /**
+     * @return list<ScheduledEvent>
+     */
+    private function healthEvents(): array
+    {
+        $schedule = $this->app?->make(Schedule::class);
+        $this->assertInstanceOf(Schedule::class, $schedule);
+
+        return array_values(array_filter(
+            $schedule->events(),
+            static fn (ScheduledEvent $event): bool => preg_match('/(^|[\s\'"])health:check([\s\'"]|$)/', (string) $event->command) === 1,
+        ));
     }
 
     /**

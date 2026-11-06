@@ -161,6 +161,8 @@ use Spatie\Health\Commands\RunHealthChecksCommand;
 Schedule::command(RunHealthChecksCommand::class)->everyMinute();
 ```
 
+Az ütemezést a csomagra is bízhatod; ilyenkor minden deploy után bemelegedési idő jár (lásd lent).
+
 Az alábbi kulcsok az `observability.health.checks` alatt vannak, és minden checknek van `enabled`
 kulcsa (alapból `true`).
 
@@ -196,6 +198,73 @@ Megjegyzések az egyes checkekhez:
 - **ContainerMemoryCheck.** cgroup v2-n a `memory.max` és a `memory.stat` (`anon`), v1-en ezek
   megfelelői (`rss`) alapján számol, a page cache nélkül. Ha nincs cgroup-memórialimit (például
   fejlesztői gépen), nem regisztrálódik.
+
+### Ütemezés deploy utáni bemelegedéssel
+
+Közvetlenül a deploy után a heartbeatek (például a Spatie queue- és schedule-checkjeié) még nincsenek
+beírva, gyakran azért, mert a cache-prefix a release-szel együtt változik. Az első futások ezért egy
+egészséges rendszeren is hibát jeleznek. Az `OBSERVABILITY_HEALTH_SCHEDULE=true` beállítással a
+csomag maga ütemezi a `health:check`-et. A deploy első scheduler-tickjétől számítva `warmup_seconds`
+ideig kihagyja az ütemezésből. Minden más ütemezett parancs közben is fut.
+
+```dotenv
+OBSERVABILITY_HEALTH_SCHEDULE=true
+# Opcionális: a bemelegedést minden release-nél újraindítja akkor is, ha a storage túléli a deployt.
+OBSERVABILITY_DEPLOY_ID="${GIT_COMMIT_SHA}"
+```
+
+A deploy-jelölő helye a `storage/app/observability/health-warmup.json` (`schedule.flag_path`). Ha a
+konténerplatform minden deploynál újra létrehozza a storage-ot, deploy-azonosító nem kell. Ha a
+jelölő nem írható, a check ennek ellenére ütemezésre kerül, így a figyelés soha nem áll le csendben. Az
+`observability.health.schedule` kulcsai: `enabled` `false`, `cron` `* * * * *`, `on_one_server`
+`true`, `warmup_seconds` 300, `flag_path` `null`. Bemelegedés alatt a doctor az ütemezés sorát
+kihagyottként mutatja, a hátralévő másodpercekkel.
+
+### JSON végpont deploy-kapuhoz
+
+A Spatie `/health-json?fresh` végpontja azzal a paranccsal futtatja a checkeket, amelyik értesítést
+is küld. Ha egy deploy-kapu közvetlenül az átállás után ezt pollolja, riasztások mennek ki. Az
+`OBSERVABILITY_HEALTH_JSON=true` beállítással a csomag a `HealthJsonController`-t regisztrálja. Ez
+ugyanígy viselkedik, de a checkeket `--no-notification`-nel futtatja. A riasztás az ütemezett
+futás dolga marad.
+
+```php
+// config/observability.php
+'json_endpoint' => [
+    'enabled' => env('OBSERVABILITY_HEALTH_JSON', false),
+    'uri' => 'health-json',
+    'middleware' => ['auth.basic'],
+    'name' => 'observability.health-json',
+],
+```
+
+A route alapból middleware nélkül jön létre. Védd le, mert az eredmények megnevezik az
+infrastruktúrádat. A Spatie `health.json_results_failure_status` és
+`health.oh_dear_endpoint.always_send_fresh_results` beállítása érvényes. Ha a controllert saját
+route-on használnád, hagyd kikapcsolva a végpontot, és a route-ot irányítsd az
+`IntrAgile\Observability\Http\Controllers\HealthJsonController`-re.
+
+### Értesítések
+
+Az `IntrAgile\Observability\Health\CheckFailedNotification` a Spatie notificationjét terjeszti ki.
+Csak a `health.notifications.environments` környezeteiből küld (alapból `['production']`), hacsak a
+`HEALTH_NOTIFICATIONS_ENABLED` nem kapcsolja be vagy ki. A nem logikai érték, például egy elgépelés,
+nem számít `false`-nak: a csomag figyelmen kívül hagyja. A cím a produkción kívül tartalmazza a
+környezetet, valamint a példány nevét és a deploy-azonosítót, például
+`[staging] shop-eu [deploy: 4ad9758]`. A `config/health.php`-ban így regisztráld:
+
+```php
+'notifications' => [
+    'enabled' => true,
+    'notifications' => [
+        IntrAgile\Observability\Health\CheckFailedNotification::class => ['slack'],
+    ],
+    // A Spatie throttle-ja továbbra is érvényes.
+    'throttle_notifications_for_minutes' => 15,
+],
+```
+
+A példány neve a `health.notifications.instance` értéke (`APP_ALIAS`, ennek hiányában `APP_NAME`).
 
 ## Prometheus
 
@@ -421,8 +490,11 @@ php artisan doctor --only=observability --format=json
 ```
 
 Ott csak a processzen belüli próbák futnak: nem nyílik WebSocket-kapcsolat, és nem megy ki
-Slack-üzenet. A `HealthChecksPass` azt jelenti, mely checkek vannak regisztrálva és ütemezve, de nem
-futtatja őket. Az élő próbákhoz az `observability:doctor --live` való.
+Slack-üzenet. A `HealthChecksPass` nem futtatja a checkeket. Azt jelenti, mely checkek vannak
+regisztrálva és ütemezve, és a Spatie result store-jából kiolvassa a legutóbbi tárolt futást. Bukott vagy
+összeomlott check esetén hibát ad. Figyelmeztet, ha nincs tárolt futás, vagy ha a legutóbbi régebbi a
+`health.stored_results.stale_minutes` értékénél (alapból 10). Az élő próbákhoz az
+`observability:doctor --live` való.
 
 ## Mi marad ki, ha nincs telepítve
 
@@ -447,7 +519,12 @@ php artisan vendor:publish --tag=observability-config
 |---|---|
 | `logging` | [Strukturált naplózás Lokihoz](#strukturált-naplózás-lokihoz) |
 | `root_guard` | [Root guard](#root-guard) |
+| `deploy_id` | [Ütemezés deploy utáni bemelegedéssel](#ütemezés-deploy-utáni-bemelegedéssel), [Értesítések](#értesítések) |
 | `health.register`, `health.checks.*` | [Health checkek](#health-checkek) |
+| `health.schedule` | [Ütemezés deploy utáni bemelegedéssel](#ütemezés-deploy-utáni-bemelegedéssel) |
+| `health.json_endpoint` | [JSON végpont deploy-kapuhoz](#json-végpont-deploy-kapuhoz) |
+| `health.notifications` | [Értesítések](#értesítések) |
+| `health.stored_results` | [laravel/doctor integráció](#laraveldoctor-integráció) |
 | `prometheus` | [Prometheus](#prometheus) |
 | `error_digest` | [Hibaösszesítő](#hibaösszesítő) |
 

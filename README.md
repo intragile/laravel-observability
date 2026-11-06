@@ -159,6 +159,8 @@ use Spatie\Health\Commands\RunHealthChecksCommand;
 Schedule::command(RunHealthChecksCommand::class)->everyMinute();
 ```
 
+Or let the package schedule it, with a warmup after each deploy (see below).
+
 All keys below live under `observability.health.checks`, and each check has an `enabled` key
 (default `true`).
 
@@ -194,6 +196,73 @@ Notes on individual checks:
 - **ContainerMemoryCheck.** Reads `memory.max` and `memory.stat` (`anon`) on cgroup v2, or their v1
   equivalents (`rss`). Page cache is excluded. It is not registered when no cgroup memory limit is
   found, for example on a development machine.
+
+### Scheduling with a deploy warmup
+
+Right after a deploy, heartbeats such as Spatie's queue and schedule checks have not been written
+yet (often because the cache prefix changes with the release), so the first runs report failures on
+a healthy system. With `OBSERVABILITY_HEALTH_SCHEDULE=true` the package schedules `health:check`
+itself and keeps it off the schedule for `warmup_seconds` after the first scheduler tick of a
+deploy. Every other scheduled command keeps running.
+
+```dotenv
+OBSERVABILITY_HEALTH_SCHEDULE=true
+# Optional: restarts the warmup on each release even when storage survives the deploy.
+OBSERVABILITY_DEPLOY_ID="${GIT_COMMIT_SHA}"
+```
+
+The deploy marker lives in `storage/app/observability/health-warmup.json` (`schedule.flag_path`).
+On container platforms where storage is recreated on each deploy, no deploy ID is needed. If the
+marker cannot be written, the check is scheduled anyway, so monitoring never stops silently. Keys
+under `observability.health.schedule`: `enabled` `false`, `cron` `* * * * *`, `on_one_server`
+`true`, `warmup_seconds` 300, `flag_path` `null`. During the warmup the doctor shows the schedule
+row as skipped, with the seconds left.
+
+### JSON endpoint for deploy gates
+
+Spatie's `/health-json?fresh` runs the checks through the command that also sends notifications,
+so a deploy gate polling it right after the switch causes alerts. With
+`OBSERVABILITY_HEALTH_JSON=true` the package registers `HealthJsonController`, which behaves the
+same but runs the checks with `--no-notification`. The scheduled run stays responsible for
+alerting.
+
+```php
+// config/observability.php
+'json_endpoint' => [
+    'enabled' => env('OBSERVABILITY_HEALTH_JSON', false),
+    'uri' => 'health-json',
+    'middleware' => ['auth.basic'],
+    'name' => 'observability.health-json',
+],
+```
+
+The route has no middleware by default; protect it, because the results name your
+infrastructure. Spatie's `health.json_results_failure_status` and
+`health.oh_dear_endpoint.always_send_fresh_results` are honoured. To use the controller on your own
+route instead, leave the endpoint disabled and point the route at
+`IntrAgile\Observability\Http\Controllers\HealthJsonController`.
+
+### Notifications
+
+`IntrAgile\Observability\Health\CheckFailedNotification` extends Spatie's notification. It sends
+only from the environments in `health.notifications.environments` (default `['production']`),
+unless `HEALTH_NOTIFICATIONS_ENABLED` forces it on or off (a value that is not a boolean, such as a
+typo, is ignored rather than read as `false`). Its title carries the environment
+outside production, the instance name and the deploy ID, for example
+`[staging] shop-eu [deploy: 4ad9758]`. Register it in `config/health.php`:
+
+```php
+'notifications' => [
+    'enabled' => true,
+    'notifications' => [
+        IntrAgile\Observability\Health\CheckFailedNotification::class => ['slack'],
+    ],
+    // Spatie's throttle still applies.
+    'throttle_notifications_for_minutes' => 15,
+],
+```
+
+The instance name comes from `health.notifications.instance` (`APP_ALIAS`, then `APP_NAME`).
 
 ## Prometheus
 
@@ -416,7 +485,9 @@ php artisan doctor --only=observability --format=json
 ```
 
 Only the in-process probes run there; no WebSocket connection is opened and no Slack message is
-sent. `HealthChecksPass` reports which checks are registered and scheduled, but does not run them.
+sent. `HealthChecksPass` does not run the checks. It reports which ones are registered and scheduled,
+and reads the latest stored run from Spatie's result store: failed or crashed checks fail it, and a
+missing run or one older than `health.stored_results.stale_minutes` (default 10) warns.
 For the live probes use `observability:doctor --live`.
 
 ## What is skipped when not installed
@@ -442,7 +513,12 @@ php artisan vendor:publish --tag=observability-config
 |---|---|
 | `logging` | [Structured logging for Loki](#structured-logging-for-loki) |
 | `root_guard` | [Root guard](#root-guard) |
+| `deploy_id` | [Scheduling with a deploy warmup](#scheduling-with-a-deploy-warmup), [Notifications](#notifications) |
 | `health.register`, `health.checks.*` | [Health checks](#health-checks) |
+| `health.schedule` | [Scheduling with a deploy warmup](#scheduling-with-a-deploy-warmup) |
+| `health.json_endpoint` | [JSON endpoint for deploy gates](#json-endpoint-for-deploy-gates) |
+| `health.notifications` | [Notifications](#notifications) |
+| `health.stored_results` | [laravel/doctor integration](#laraveldoctor-integration) |
 | `prometheus` | [Prometheus](#prometheus) |
 | `error_digest` | [Error digest](#error-digest) |
 

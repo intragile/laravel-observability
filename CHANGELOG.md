@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Opt-in scheduling of `health:check` (`health.schedule`), held back for a warmup window after
+  each deploy so the first runs do not alert on heartbeats that are not written yet. An optional
+  `deploy_id` restarts the window when storage survives the deploy.
+- `HealthJsonController` and an opt-in route (`health.json_endpoint`): Spatie's JSON results
+  endpoint, except that a `?fresh` run never sends notifications, for deploy gates.
+- `CheckFailedNotification`, which sends only from the configured environments (default
+  production, overridable with `HEALTH_NOTIFICATIONS_ENABLED`) and labels the message with the
+  environment, the instance name and the deploy ID; `NotificationPolicy` holds the rule.
+- `HealthChecksPass` (laravel/doctor) now reads the latest stored health run: failed or crashed
+  checks fail it, and a missing or stale run (`health.stored_results.stale_minutes`) warns.
+
+### Changed
+
+- The doctor's scheduling probe reports `health:check` as skipped, not missing, during the deploy
+  warmup.
+
 ## [1.0.0] - 2026-11-06
 
 ### Added
@@ -63,6 +83,7 @@ applications. Behaviour differs from those copies in the following ways:
   the logged exception and every exception in its `previous` chain, and to the stored error digest
   messages; some previous copies redacted only one of these or none.
 
+[Unreleased]: https://github.com/intragile/laravel-observability/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/intragile/laravel-observability/releases/tag/v1.0.0
 
 ---

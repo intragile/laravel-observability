@@ -11,6 +11,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Env;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use IntrAgile\Observability\Backup\RecordBackupHeartbeat;
 use IntrAgile\Observability\Console\DoctorCommand;
@@ -24,6 +25,8 @@ use IntrAgile\Observability\Doctor\Probes\HealthChecksProbe;
 use IntrAgile\Observability\Doctor\Probes\LoggingProbe;
 use IntrAgile\Observability\Doctor\Probes\PrometheusProbe;
 use IntrAgile\Observability\Doctor\Probes\SchedulingProbe;
+use IntrAgile\Observability\Health\HealthCheckScheduler;
+use IntrAgile\Observability\Http\Controllers\HealthJsonController;
 use IntrAgile\Observability\Http\Middleware\PrometheusBasicAuth;
 use IntrAgile\Observability\Http\Middleware\RecordRequestTiming;
 use IntrAgile\Observability\Metrics\PrometheusRegistrar;
@@ -95,6 +98,14 @@ final class ObservabilityServiceProvider extends ServiceProvider
 
         if ($config->get('observability.error_digest.enabled')) {
             $this->scheduleErrorDigest();
+        }
+
+        if ($config->get('observability.health.schedule.enabled')) {
+            $this->scheduleHealthChecks();
+        }
+
+        if ($config->get('observability.health.json_endpoint.enabled')) {
+            $this->registerHealthJsonRoute();
         }
 
         if (class_exists(self::DOCTOR_DIAGNOSTIC_CLASS) && class_exists(Inspector::DOCTOR_CLASS)) {
@@ -250,6 +261,40 @@ final class ObservabilityServiceProvider extends ServiceProvider
                 ->withoutOverlapping()
                 ->onOneServer();
         });
+    }
+
+    /**
+     * The warmup decision is made when the schedule is resolved, which happens once per
+     * schedule:run tick, so every tick re-reads the deploy marker.
+     */
+    private function scheduleHealthChecks(): void
+    {
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $config = $this->config();
+            $cron = $config->get('observability.health.schedule.cron');
+
+            HealthCheckScheduler::fromConfig($config, fn (string $path): string => $this->app->storagePath($path))
+                ->register(
+                    $schedule,
+                    is_string($cron) && $cron !== '' ? $cron : '* * * * *',
+                    (bool) $config->get('observability.health.schedule.on_one_server', true),
+                );
+        });
+    }
+
+    private function registerHealthJsonRoute(): void
+    {
+        $config = $this->config();
+        $uri = $config->get('observability.health.json_endpoint.uri');
+        $middleware = $config->get('observability.health.json_endpoint.middleware');
+        $name = $config->get('observability.health.json_endpoint.name');
+
+        $route = Route::get(is_string($uri) && $uri !== '' ? $uri : 'health-json', HealthJsonController::class)
+            ->middleware(is_array($middleware) ? array_values(array_filter($middleware, is_string(...))) : []);
+
+        if (is_string($name) && $name !== '') {
+            $route->name($name);
+        }
     }
 
     private function config(): Repository
