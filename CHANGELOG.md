@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-06
+
 ### Added
 
 - Opt-in scheduling of `health:check` (`health.schedule`), held back for a warmup window after
@@ -83,7 +85,8 @@ applications. Behaviour differs from those copies in the following ways:
   the logged exception and every exception in its `previous` chain, and to the stored error digest
   messages; some previous copies redacted only one of these or none.
 
-[Unreleased]: https://github.com/intragile/laravel-observability/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/intragile/laravel-observability/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/intragile/laravel-observability/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/intragile/laravel-observability/releases/tag/v1.0.0
 
 ---
