@@ -56,7 +56,7 @@ return [
             'mail_relay' => [
                 'enabled' => true,
                 'environments' => ['production'],
-                'catcher_hosts' => ['mailhog', 'mailpit', 'mailtrap', 'mailcatcher', 'maildev', 'smtp4dev'],
+                'catcher_hosts' => ['mailhog', 'mailpit', 'sandbox.smtp.mailtrap.io', 'mailcatcher', 'maildev', 'smtp4dev'],
                 'catcher_ports' => [1025, 1080, 8025],
                 'hold_config_key' => null,
             ],
