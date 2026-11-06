@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IntrAgile\Observability\Tests\Feature;
 
+use Illuminate\Foundation\Application;
 use IntrAgile\Observability\Metrics\PrometheusRegistrar;
 use IntrAgile\Observability\Support\ContainerMemory;
 use IntrAgile\Observability\Tests\TestCase;
@@ -38,6 +39,19 @@ final class PrometheusRegistrarTest extends TestCase
     protected function getPackageProviders($app): array
     {
         return [...parent::getPackageProviders($app), PrometheusServiceProvider::class];
+    }
+
+    /**
+     * The endpoint is read without credentials, and the registrar is driven by hand with its own
+     * settings, so the provider's automatic registration is switched off to keep it out of the way.
+     *
+     * @param  Application  $app
+     */
+    protected function defineEnvironment($app): void
+    {
+        $app->make('config')->set('observability.prometheus.basic_auth.enabled', false);
+        $app->make('config')->set('observability.prometheus.container_memory_gauges', false);
+        $app->make('config')->set('observability.prometheus.queue_collectors.enabled', false);
     }
 
     public function test_exposes_container_memory_gauges_when_limit_exists(): void
