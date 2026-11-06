@@ -51,7 +51,7 @@
         "laravel/reverb": "^1.4",
         "orchestra/testbench": "^10.0|^11.0",
         "phpunit/phpunit": "^12.0",
-        "phrity/websocket": "^3.0|^4.0",
+        "phrity/websocket": "^4.0",
         "spatie/laravel-backup": "^9.4|^10.0",
         "spatie/laravel-prometheus": "^1.2"
     },
@@ -59,7 +59,7 @@
         "spatie/laravel-prometheus": "Exposes /prometheus; enables the basic auth middleware, container memory gauges and queue collectors (^1.2).",
         "spatie/laravel-backup": "Enables the backup heartbeat listener and BackupFreshnessCheck (^9.4|^10.0).",
         "laravel/reverb": "Required with phrity/websocket for the end-to-end BroadcastCheck (^1.4).",
-        "phrity/websocket": "WebSocket client used by the BroadcastCheck round-trip probe (^3.0|^4.0).",
+        "phrity/websocket": "WebSocket client used by the BroadcastCheck round-trip probe (^4.0).",
         "laravel/doctor": "Shows the static observability probes inside `php artisan doctor` (^0.1)."
     },
     "conflict": {
