@@ -1,0 +1,95 @@
+{
+    "name": "intragile/laravel-observability",
+    "description": "Observability kit for Laravel on top of spatie/laravel-health and spatie/laravel-prometheus: Loki-ready JSON logging with SQL redaction, extra health checks, fail-closed Prometheus basic auth, a grouped Slack error digest, and a doctor command that probes the whole chain live.",
+    "keywords": [
+        "laravel",
+        "observability",
+        "monitoring",
+        "health-check",
+        "spatie-health",
+        "prometheus",
+        "loki",
+        "grafana",
+        "logging",
+        "json-logging",
+        "metrics",
+        "reverb",
+        "megfigyelhetőség",
+        "naplózás",
+        "monitorozás",
+        "állapotfigyelés"
+    ],
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://intragile.eu",
+    "support": {
+        "issues": "https://github.com/intragile/laravel-observability/issues",
+        "source": "https://github.com/intragile/laravel-observability",
+        "security": "https://github.com/intragile/laravel-observability/security/policy"
+    },
+    "authors": [
+        {
+            "name": "IntrAgile Kft.",
+            "email": "info@intragile.eu",
+            "homepage": "https://intragile.eu"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/console": "^12.0|^13.0",
+        "illuminate/contracts": "^12.0|^13.0",
+        "illuminate/database": "^12.0|^13.0",
+        "illuminate/http": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0",
+        "monolog/monolog": "^3.0",
+        "spatie/laravel-health": "^1.37"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "laravel/doctor": "^0.1",
+        "laravel/pint": "^1.20",
+        "laravel/reverb": "^1.4",
+        "orchestra/testbench": "^10.0|^11.0",
+        "phpunit/phpunit": "^12.0",
+        "phrity/websocket": "^3.0|^4.0",
+        "spatie/laravel-backup": "^9.4|^10.0",
+        "spatie/laravel-prometheus": "^1.2"
+    },
+    "suggest": {
+        "spatie/laravel-prometheus": "Exposes /prometheus; enables the basic auth middleware, container memory gauges and queue collectors (^1.2).",
+        "spatie/laravel-backup": "Enables the backup heartbeat listener and BackupFreshnessCheck (^9.4|^10.0).",
+        "laravel/reverb": "Required with phrity/websocket for the end-to-end BroadcastCheck (^1.4).",
+        "phrity/websocket": "WebSocket client used by the BroadcastCheck round-trip probe (^3.0|^4.0).",
+        "laravel/doctor": "Shows the static observability probes inside `php artisan doctor` (^0.1)."
+    },
+    "conflict": {
+        "illuminate/support": "<12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "IntrAgile\\Observability\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "IntrAgile\\Observability\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "IntrAgile\\Observability\\ObservabilityServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=1G",
+        "format": "pint"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

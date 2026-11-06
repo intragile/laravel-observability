@@ -1,0 +1,3 @@
+providers:
+  - Spatie\Health\HealthServiceProvider
+  - IntrAgile\Observability\ObservabilityServiceProvider
