@@ -3,7 +3,7 @@ on:
   push:
   pull_request:
   schedule:
-    - cron: "0 6 * * 1"
+    - cron: "7 5 * * 1"
   workflow_dispatch:
 env:
   # Runs the broadcast round trip against a real Reverb server started by the test.
@@ -55,4 +55,56 @@ jobs:
       - run: composer remove --dev spatie/laravel-prometheus spatie/laravel-backup laravel/reverb phrity/websocket laravel/doctor --no-update --no-interaction
       - run: composer require --dev "illuminate/support:12.*" --no-update --no-interaction
       - run: composer update --prefer-dist --no-interaction --no-progress
+      - run: vendor/bin/phpunit
+
+  next-versions:
+    # Early warning against the next PHP release and the next Laravel major,
+    # installed with minimum-stability dev. Static analysis and style are left to the jobs
+    # above. A failure here does not fail the run, so check this job's result.
+    # Laravel master has no branch alias, so the matching Testbench branch is named here;
+    # bump both rows when a new PHP or Laravel version ships.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { php: '8.6', laravel: '13.*', testbench: '*' }
+          - { php: '8.5', laravel: 'dev-master', testbench: '12.x-dev' }
+    name: Next / PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
+    env:
+      LARAVEL: ${{ matrix.laravel }}
+      TESTBENCH: ${{ matrix.testbench }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo_sqlite, posix, pcntl, sockets
+          coverage: none
+      - name: Retarget composer.json at the upcoming versions
+        run: |
+          php -r '
+            $c = json_decode(file_get_contents("composer.json"), true);
+            foreach (["larastan/larastan", "phpstan/phpstan", "laravel/pint"] as $tool) {
+                unset($c["require-dev"][$tool]);
+            }
+            if (isset($c["require-dev"]["orchestra/testbench"])) {
+                $c["require-dev"]["orchestra/testbench"] = getenv("TESTBENCH") ?: "*";
+            }
+            $laravel = (string) getenv("LARAVEL");
+            foreach (["require", "require-dev"] as $section) {
+                foreach (array_keys($c[$section] ?? []) as $name) {
+                    if ($laravel !== "" && str_starts_with($name, "illuminate/")) {
+                        $c[$section][$name] = $laravel;
+                    }
+                }
+            }
+            $c["minimum-stability"] = "dev";
+            $c["prefer-stable"] = true;
+            file_put_contents("composer.json", json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+          '
+      - if: matrix.laravel == 'dev-master'
+        run: composer remove --dev spatie/laravel-prometheus spatie/laravel-backup laravel/reverb phrity/websocket laravel/doctor --no-update --no-interaction
+      - run: composer update --prefer-dist --no-interaction --no-progress --ignore-platform-req=php+
       - run: vendor/bin/phpunit
